@@ -54,19 +54,21 @@ def main():
     from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     parser = ArgumentParser(
         formatter_class=ArgumentDefaultsHelpFormatter,
-        description='Read most recent post on Carma\'s Cafe website and '
-                    'publish an SNS message if there looks like they have '
-                    'mocha chip scones.',
+        description='Read the latest post from the Carma\'s Cafe website, '
+                    'check if mocha chip scones look like they\'re on the '
+                    'menu, and send an AWS SNS message if they are (and if we '
+                    'haven\'t already sent one today).',
     )
     parser.add_argument('topic_arn', type=str,
-                        help='AWS SNS topic ARN')
+                        help='ARN of AWS SNS topic to publish message to')
     parser.add_argument('--message', type=str, default='mocha chip!',
                         help='Message to send if it looks like they have '
                              'mocha chip scones')
     parser.add_argument('--profile-name', type=str,
                         help='AWS credential profile to use')
     parser.add_argument('--log-path', type=str, default='sconedrone.log',
-                        help='Path to file tracking notifications we\'ve sent')
+                        help='Path to file that tracks whether we\'ve already '
+                             'sent a notification today')
     args = parser.parse_args()
 
     last_good_month_day = read_last_good_month_day(args.log_path)
