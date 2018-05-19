@@ -39,8 +39,10 @@ def has_mocha_chip_today():
 def read_last_good_month_day(path):
     if os.path.exists(path):
         with open(path) as f:
+            last_line = None
             for line in f:
-                return line.strip()
+                last_line = line.strip()
+            return last_line
     else:
         return None
 
