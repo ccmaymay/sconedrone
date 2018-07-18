@@ -2,6 +2,7 @@
 
 import os
 import datetime
+import logging
 
 import requests
 from bs4 import BeautifulSoup
@@ -9,6 +10,9 @@ import boto3
 
 
 URL = 'http://www.carmascafe.com/'
+BUCKET_KEY = 'last_good_month_day'
+
+LOGGER = logging.getLogger(__name__)
 
 
 def mocha_chip_filter(tag):
@@ -36,20 +40,47 @@ def has_mocha_chip_today():
     return post_is_today(posts[0]) and post_has_mocha_chip(posts[0])
 
 
-def read_last_good_month_day(path):
-    if os.path.exists(path):
-        with open(path) as f:
-            last_line = None
-            for line in f:
-                last_line = line.strip()
-            return last_line
-    else:
+def read_last_good_month_day(client, bucket_name):
+    try:
+        response = client.get_object(Bucket=bucket_name, Key=BUCKET_KEY)
+        return response['Body'].read().decode('utf-8')
+    except client.exceptions.NoSuchKey as e:
         return None
 
 
-def write_good_month_day(path):
-    with open(path, 'a') as f:
-        f.write(month_day_today() + '\n')
+def write_good_month_day(client, bucket_name, month_day):
+    client.put_object(Bucket=bucket_name, Key=BUCKET_KEY,
+                      Body=month_day.encode('utf-8'))
+
+
+def notify_if_good_month_day(topic_arn, bucket_name, message='mocha chip! <3'):
+    month_day = month_day_today()
+
+    session = boto3.Session()
+    s3 = session.client('s3')
+
+    LOGGER.info('reading last good day from {}'.format(bucket_name))
+    if read_last_good_month_day(s3, bucket_name) != month_day:
+        if has_mocha_chip_today():
+            LOGGER.info('today is a good day!')
+
+            LOGGER.info('notifying {}'.format(topic_arn))
+            sns = session.client('sns')
+            sns.publish(TopicArn=topic_arn,
+                        Message='{}: {}'.format(month_day, message))
+
+            LOGGER.info('updating good day in {}'.format(bucket_name))
+            write_good_month_day(s3, bucket_name, month_day)
+
+            return True
+
+        else:
+            LOGGER.info('today is not a good day :\'(')
+            return False
+
+    else:
+        LOGGER.info('today is a good day!  (already sent notifications)')
+        return False
 
 
 def main():
@@ -61,26 +92,22 @@ def main():
                     'menu, and send an AWS SNS message if they are (and if we '
                     'haven\'t already sent one today).',
     )
-    parser.add_argument('topic_arn', type=str,
+    parser.add_argument('topic_arn',
                         help='ARN of AWS SNS topic to publish message to')
-    parser.add_argument('--message', type=str, default='mocha chip!',
+
+    parser.add_argument('bucket_name',
+                        help='Name of AWS S3 bucket to write state to')
+    parser.add_argument('--message', default='mocha chip! <3',
                         help='Message to send if it looks like they have '
                              'mocha chip scones')
-    parser.add_argument('--profile-name', type=str,
-                        help='AWS credential profile to use')
-    parser.add_argument('--log-path', type=str, default='sconedrone.log',
-                        help='Path to file that tracks whether we\'ve already '
-                             'sent a notification today')
     args = parser.parse_args()
-
-    last_good_month_day = read_last_good_month_day(args.log_path)
-    if last_good_month_day != month_day_today() and has_mocha_chip_today():
-        session = boto3.Session(profile_name=args.profile_name)
-        client = session.client('sns')
-        client.publish(TopicArn=args.topic_arn,
-                       Message='{}: {}'.format(month_day_today(),
-                                               args.message))
-        write_good_month_day(args.log_path)
+    logging.basicConfig(format='%(asctime)-15s %(levelname)-9s %(message)s',
+                        level=logging.INFO)
+    notify_if_good_month_day(
+        topic_arn=args.topic_arn,
+        bucket_name=args.bucket_name,
+        message=args.message,
+    )
 
 
 if __name__ == '__main__':
